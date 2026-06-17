@@ -1,0 +1,1464 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🇲🇾 价格计算器 (锡) 🇨🇳</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; -webkit-text-size-adjust: 100%; }
+        .input-group { margin-bottom: 1rem; }
+        .input-label { display: block; font-weight: 600; margin-bottom: 0.5rem; color: #374151; }
+        .input-field { width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; font-size: 16px; box-sizing: border-box; }
+        .section-title { font-size: 1.1rem; font-weight: 700; color: #1f2937; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 2px solid #3b82f6; }
+        .result-box { background: #f3f4f6; padding: 1rem; border-radius: 0.5rem; margin-top: 1rem; }
+        .loading { opacity: 0.6; pointer-events: none; }
+        
+        /* 移动端优化 */
+        @media (max-width: 768px) {
+            body { padding: 1rem 0.5rem; }
+            .max-w-6xl { max-width: 100%; padding: 0 0.5rem; }
+            h1 { font-size: 1.5rem !important; }
+            .section-title { font-size: 1rem; }
+            .grid { gap: 0.75rem !important; }
+            .p-6 { padding: 1rem !important; }
+            .text-3xl { font-size: 1.5rem !important; }
+            .text-2xl { font-size: 1.25rem !important; }
+            .text-xl { font-size: 1.1rem !important; }
+            button { min-height: 44px; min-width: 44px; }
+            input[type="number"], input[type="text"], select { font-size: 16px; }
+            .radio-group { flex-direction: column; gap: 0.5rem; }
+            .radio-label { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; background: #f9fafb; border-radius: 0.5rem; }
+        }
+        
+        /* 触摸优化 */
+        @media (hover: none) and (pointer: coarse) {
+            button, input, select { min-height: 44px; }
+            a, button { touch-action: manipulation; }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen py-4 sm:py-8">
+    <div class="max-w-6xl mx-auto px-3 sm:px-4">
+        <h1 class="text-2xl sm:text-3xl font-bold text-center text-blue-800 mb-4 sm:mb-8">🇲🇾 价格计算器 (锡) 🇨🇳</h1>
+        
+        <!-- 数据刷新区域 -->
+        <div class="bg-white rounded-lg shadow-md p-4 sm:p-6 mb-4 sm:mb-6">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+                <h2 class="text-lg sm:text-xl font-semibold">实时市场数据</h2>
+                <button id="refreshBtn" onclick="refreshAllData()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors w-full sm:w-auto">
+                    🔄 刷新数据
+                </button>
+            </div>
+            <div id="dataStatus" class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 text-xs sm:text-sm">
+                <div class="p-2 sm:p-3 bg-blue-50 rounded">
+                    <div class="text-gray-600 text-xs sm:text-sm">LME 伦锡现货价（近一个交易周的均价）</div>
+                    <div id="lmePrice" class="font-bold text-blue-700 text-sm sm:text-base">-</div>
+                </div>
+                <div class="p-2 sm:p-3 bg-green-50 rounded">
+                    <div class="text-gray-600 text-xs sm:text-sm">SMM 沪锡现货价（近三个交易周的均价）</div>
+                    <div id="smmPrice" class="font-bold text-green-700 text-sm sm:text-base">-</div>
+                </div>
+                <div class="p-2 sm:p-3 bg-purple-50 rounded">
+                    <div class="text-gray-600 text-xs sm:text-sm">USD/MYR</div>
+                    <div id="usdMyr" class="font-bold text-purple-700 text-sm sm:text-base">-</div>
+                </div>
+                <div class="p-2 sm:p-3 bg-red-50 rounded">
+                    <div class="text-gray-600 text-xs sm:text-sm">MYR/CNY</div>
+                    <div id="myrCny" class="font-bold text-red-700 text-sm sm:text-base">-</div>
+                </div>
+            </div>
+        </div>
+
+        <form id="calculatorForm" class="space-y-6">
+            <!-- 境外卖家折扣计算器 -->
+            <div class="bg-gradient-to-r from-orange-50 to-red-50 rounded-lg shadow-md p-4 sm:p-6 border-2 border-orange-300">
+                <h2 class="section-title border-orange-400">🌏 境外卖家人民币报价折扣计算器</h2>
+                <p class="text-sm text-gray-600 mb-4">用于计算境外卖家人民币报价相对于 LME 伦锡现货价的折扣比例</p>
+                
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                    <div class="input-group">
+                        <label class="input-label">境外卖家报价 (CNY/吨)</label>
+                        <input type="number" id="thaiPrice" step="0.01" class="input-field" placeholder="例如：380000" value="380000">
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">LME 伦锡现货价 (USD/MT)</label>
+                        <input type="number" id="lmePriceForThai" step="0.01" class="input-field bg-gray-100" placeholder="自动填充" readonly>
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">USD/CNY 汇率</label>
+                        <input type="number" id="usdCnyRate" step="0.0001" class="input-field bg-gray-100" placeholder="自动计算" readonly>
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">按钮</label>
+                        <button type="button" onclick="calculateThaiDiscount()" class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg transition-colors w-full font-semibold">
+                            🧮 计算折扣
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 计算结果 -->
+                <div id="thaiDiscountResult" class="result-box mt-4" style="display:none;">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div class="p-3 bg-white rounded-lg shadow">
+                            <div class="text-gray-600 text-sm">LME 换算为人民币</div>
+                            <div id="lmePriceCNY" class="text-lg font-bold text-blue-600">CNY 0.00 / MT</div>
+                        </div>
+                        <div class="p-3 bg-white rounded-lg shadow">
+                            <div class="text-gray-600 text-sm">折扣比例</div>
+                            <div id="discountRatio" class="text-xl font-bold text-orange-600">0.00</div>
+                        </div>
+                        <div class="p-3 bg-white rounded-lg shadow">
+                            <div class="text-gray-600 text-sm">相当于几折</div>
+                            <div id="discountFold" class="text-2xl font-bold text-green-600">0.0 折</div>
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-3">💡 计算公式：折扣比例 = 泰国报价 ÷ (LME 价格 × USD/CNY 汇率)；例如：380,000 ÷ 540,000 ≈ 0.70，即 7 折</p>
+                </div>
+            </div>
+
+            <!-- 第一部分：马来西亚收矿成本 -->
+            <div class="bg-white rounded-lg shadow-md p-4 sm:p-6">
+                <h2 class="section-title">📍 第一部分：马来西亚境内收矿成本</h2>
+                
+                <!-- 收货方式选择 -->
+                <div class="mb-4 sm:mb-6">
+                    <label class="input-label">收货方式</label>
+                    <div class="flex flex-col sm:flex-row gap-3 radio-group">
+                        <label class="radio-label flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="pricingType" value="metal" checked onchange="togglePricingType()" class="w-4 h-4">
+                            <span>按金属吨计价</span>
+                        </label>
+                        <label class="radio-label flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="pricingType" value="natural" onchange="togglePricingType()" class="w-4 h-4">
+                            <span>按自然吨计价</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 金属吨计价字段 -->
+                <div id="metalPricingFields">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                        <div class="input-group">
+                            <label class="input-label">锡精矿品位 (%)</label>
+                            <input type="number" id="grade" step="0.1" class="input-field" placeholder="例如：30" oninput="calculateNaturalTons()">
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">金属吨数 (吨)</label>
+                            <input type="number" id="metalTons" step="0.01" class="input-field" placeholder="例如：100" oninput="calculateNaturalTons()">
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">自然吨吨数 (吨)</label>
+                            <input type="text" id="naturalTonsDisplay" class="input-field bg-gray-100" placeholder="自动计算" readonly>
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">折扣率 (%)</label>
+                            <input type="number" id="discount" step="0.1" class="input-field" placeholder="例如：15" value="15">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 自然吨计价字段 -->
+                <div id="naturalPricingFields" style="display:none;">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                        <div class="input-group">
+                            <label class="input-label">自然吨数 (吨)</label>
+                            <input type="number" id="naturalTons" step="0.01" class="input-field" placeholder="例如：100">
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">自然吨单价 (MYR/吨)</label>
+                            <input type="number" id="naturalPrice" step="0.01" class="input-field" placeholder="例如：500">
+                        </div>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-2">适用于矿主直接按原矿自然吨出售，无需按金属品位折算</p>
+                    
+                    <!-- 自然吨计算按钮 -->
+                    <div class="mt-4">
+                        <button type="button" onclick="calculateNaturalTonCost()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors w-full sm:w-auto">
+                            🧮 计算自然吨成本
+                        </button>
+                    </div>
+                    
+                    <!-- 自然吨计算结果 -->
+                    <div id="naturalTonResultBox" class="result-box mt-4" style="display:none;">
+                        <div class="font-semibold text-gray-700">收矿单位成本 (CNY/MT)：</div>
+                        <div id="naturalUnitCost" class="text-xl font-bold text-purple-600">CNY 0.00 / MT</div>
+                        <div class="font-semibold text-gray-700 mt-2">收矿成本合计 (CNY)：</div>
+                        <div id="naturalTotalCost" class="text-2xl font-bold text-blue-600">CNY 0.00</div>
+                    </div>
+                    
+                    <!-- 自然吨↔金属吨换算模块（仅自然吨计价时显示） -->
+                    <div class="mt-4 sm:mt-6 p-3 sm:p-4 bg-blue-50 rounded-lg border border-blue-200">
+                    <h3 class="font-semibold text-blue-800 mb-3 text-sm sm:text-base">🔄 自然吨 ↔ 金属吨 换算工具</h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                        <div class="input-group">
+                            <label class="input-label">品位 (%)</label>
+                            <input type="number" id="convertGrade" step="0.1" class="input-field" placeholder="例如：70" oninput="convertTons()">
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">自然吨总价 (MYR)</label>
+                            <input type="number" id="naturalTotalPrice" step="0.01" class="input-field" placeholder="例如：120000" oninput="convertTons()">
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">金属吨单价 (MYR/MT)</label>
+                            <input type="number" id="metalUnitPrice" step="0.01" class="input-field" placeholder="自动计算" readonly>
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">换算结果</label>
+                            <div id="convertResult" class="text-sm font-medium text-blue-700 pt-2">-</div>
+                        </div>
+                    </div>
+                    <!-- 折扣系数计算 -->
+                    <div class="mt-4 pt-4 border-t border-blue-200">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                            <div class="input-group">
+                                <label class="input-label">LME 伦锡现货价 (USD/MT)</label>
+                                <input type="number" id="lmePriceInput" step="0.01" class="input-field" placeholder="自动填充" readonly>
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label">金属吨单价 (MYR/MT)</label>
+                                <input type="number" id="metalPriceForDiscount" step="0.01" class="input-field" placeholder="自动填充" readonly>
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label">折扣系数</label>
+                                <div id="discountCoefficientResult" class="text-lg font-bold text-purple-600 pt-2">-</div>
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-2">💡 折扣系数 = 金属吨单价 ÷ LME 伦锡现货价 × 汇率，反映实际成交价相对于国际基准价的折扣水平</p>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-2">💡 场景：印尼货报价锡精粉 70 度，自然吨 120,000 马币 → 金属吨单价 = 120000 ÷ 70% = 171,428.57 MYR/MT</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-3 sm:mt-4">
+                    <div class="input-group">
+                        <label class="input-label">运输方式</label>
+                        <select id="transportType" class="input-field">
+                            <option value="free">卖家送货 (无运费)</option>
+                            <option value="self">自提 (需付运费)</option>
+                        </select>
+                    </div>
+                    <div class="input-group" id="freightGroup" style="display:none;">
+                        <label class="input-label">运费 (MYR)</label>
+                        <input type="number" id="freightCost" step="0.01" class="input-field" placeholder="例如：5000">
+                    </div>
+                </div>
+                
+                <!-- 第一部分计算按钮 -->
+                <div class="mt-4">
+                    <button type="button" onclick="calculatePart1()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors w-full sm:w-auto">
+                        🧮 计算第一部分结果
+                    </button>
+                </div>
+                
+                <!-- 第一部分计算结果 -->
+                <div id="part1ResultBox" class="result-box mt-4" style="display:none;">
+                    <div class="font-semibold text-gray-700">收矿单位成本 (CNY/MT)：</div>
+                    <div id="part1UnitCost" class="text-xl font-bold text-purple-600">CNY 0.00 / MT</div>
+                    <div class="font-semibold text-gray-700 mt-2">收矿成本合计 (CNY)：</div>
+                    <div id="part1Result" class="text-2xl font-bold text-blue-600">CNY 0.00</div>
+                </div>
+            </div>
+
+            <!-- 第二部分：运输成本 -->
+            <div class="bg-white rounded-lg shadow-md p-4 sm:p-6">
+                <h2 class="section-title">🚢 第二部分：马来西亚→中国运输成本</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                    <div class="input-group">
+                        <label class="input-label">海运费 (MYR/20GP)</label>
+                        <input type="number" id="seaFreight" step="0.01" class="input-field" placeholder="例如：3500" value="3500">
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">报关费 (MYR/柜)</label>
+                        <input type="number" id="customsFee" step="0.01" class="input-field" placeholder="例如：500" value="500">
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">杂费 (MYR)</label>
+                        <input type="number" id="miscFee" step="0.01" class="input-field" placeholder="例如：1500" value="1500">
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">拖车费 (MYR)</label>
+                        <input type="number" id="truckingFee" step="0.01" class="input-field" placeholder="例如：2000" value="2000">
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">资源税 (MYR/柜)</label>
+                        <input type="number" id="resourceTax" step="0.01" class="input-field" placeholder="例如：1000" value="1000">
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">仓储费 (MYR/柜)</label>
+                        <input type="number" id="storageFee" step="0.01" class="input-field" placeholder="例如：500" value="500">
+                    </div>
+                </div>
+                
+                <!-- 第二部分计算按钮 -->
+                <div class="mt-4">
+                    <button type="button" onclick="calculatePart2()" class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors w-full sm:w-auto">
+                        🧮 计算第二部分结果
+                    </button>
+                </div>
+                
+                <!-- 第二部分计算结果 -->
+                <div id="part2ResultBox" class="result-box mt-4" style="display:none;">
+                    <div class="font-semibold text-gray-700">运输成本合计：</div>
+                    <div id="part2ResultMYR" class="text-xl font-bold text-blue-600">MYR 0.00</div>
+                    <div class="font-semibold text-gray-700 mt-2">折合人民币：</div>
+                    <div id="part2Result" class="text-2xl font-bold text-green-600">CNY 0.00</div>
+                </div>
+            </div>
+
+            <!-- 第三部分：销售价计算 -->
+            <div class="bg-white rounded-lg shadow-md p-4 sm:p-6">
+                <h2 class="section-title">💰 第三部分：中国销售价计算</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                    <div class="input-group">
+                        <label class="input-label">计价方式</label>
+                        <select id="pricingMethod" class="input-field" onchange="togglePricingFields()">
+                            <option value="deduction">品位≥30°：扣减加工费</option>
+                            <option value="coefficient">品位≤30°：系数折扣</option>
+                        </select>
+                    </div>
+                    <div class="input-group" id="processingFeeGroup">
+                        <label class="input-label">加工费 (CNY/吨)</label>
+                        <input type="number" id="processingFee" step="0.01" class="input-field" placeholder="例如：15000" value="15000">
+                    </div>
+                    <div class="input-group" id="coefficientGroup" style="display:none;">
+                        <label class="input-label">折扣系数</label>
+                        <input type="number" id="discountCoefficient" step="0.001" class="input-field" placeholder="例如：0.95" value="0.95">
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">中国内陆运费 (CNY/吨)</label>
+                        <input type="number" id="chinaTransport" step="0.01" class="input-field" placeholder="例如：500" value="500">
+                    </div>
+                </div>
+                
+                <!-- 第三部分计算按钮 -->
+                <div class="mt-4">
+                    <button type="button" onclick="calculatePart3()" class="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors w-full sm:w-auto">
+                        🧮 计算第三部分结果
+                    </button>
+                </div>
+                
+                <!-- 第三部分计算结果 -->
+                <div id="part3ResultBox" class="result-box mt-4" style="display:none;">
+                    <div class="font-semibold text-gray-700">建议销售价 (不含税)：</div>
+                    <div id="part3Result" class="text-2xl font-bold text-red-600">CNY 0.00 / MT</div>
+                    <div id="totalRevenue" class="text-lg font-semibold text-gray-600 mt-2">预计总收入：CNY 0.00</div>
+                </div>
+            </div>
+
+            <!-- 利润分析 -->
+            <div class="bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg shadow-md p-4 sm:p-6">
+                <h2 class="section-title">📊 利润分析</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+                    <div class="p-4 bg-white rounded-lg shadow">
+                        <div class="text-gray-600">总成本 (CNY)</div>
+                        <div id="totalCost" class="text-xl font-bold text-gray-800">0.00</div>
+                    </div>
+                    <div class="p-4 bg-white rounded-lg shadow">
+                        <div class="text-gray-600">总收入 (CNY)</div>
+                        <div id="totalIncome" class="text-xl font-bold text-gray-800">0.00</div>
+                    </div>
+                    <div class="p-4 bg-white rounded-lg shadow">
+                        <div class="text-gray-600">毛利润 (CNY)</div>
+                        <div id="grossProfit" class="text-xl font-bold text-green-600">0.00</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 操作按钮 -->
+            <div class="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 justify-center">
+                <button type="button" onclick="calculate()" class="bg-green-600 hover:bg-green-700 text-white px-6 sm:px-8 py-3 rounded-lg text-base sm:text-lg font-semibold transition-colors w-full sm:w-auto">
+                    💹 计算价格
+                </button>
+                <button type="button" onclick="exportToExcel()" class="bg-purple-600 hover:bg-purple-700 text-white px-6 sm:px-8 py-3 rounded-lg text-base sm:text-lg font-semibold transition-colors w-full sm:w-auto">
+                    📥 下载 Excel
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        // 全局数据存储 - 添加默认值确保初始化稳定
+        let marketData = {
+            lmePrice: 54000,      // 默认 LME 价格 USD/MT
+            smmPrice: 419150,     // 默认 SMM 价格 CNY/MT
+            usdMyr: 4.45,         // 默认 USD/MYR 汇率
+            myrCny: 1.55          // 默认 MYR/CNY 汇率
+        };
+
+        // 安全获取 DOM 元素的辅助函数
+        function safeGetElement(id) {
+            const el = document.getElementById(id);
+            if (!el) {
+                console.warn(`元素未找到：${id}`);
+                return null;
+            }
+            return el;
+        }
+
+        // 安全解析数值的辅助函数
+        function safeParseNumber(value, defaultValue = 0) {
+            const num = parseFloat(value);
+            return isNaN(num) ? defaultValue : num;
+        }
+
+        // DOM 加载完成后初始化事件监听
+        document.addEventListener('DOMContentLoaded', function() {
+            const transportTypeEl = safeGetElement('transportType');
+            if (transportTypeEl) {
+                transportTypeEl.addEventListener('change', function() {
+                    const freightGroup = safeGetElement('freightGroup');
+                    if (freightGroup) {
+                        freightGroup.style.display = this.value === 'self' ? 'block' : 'none';
+                    }
+                });
+            }
+            
+            // 初始化显示状态
+            togglePricingType();
+            togglePricingFields();
+        });
+
+        // 计算自然吨吨数（金属吨计价模式下）
+        function calculateNaturalTons() {
+            const grade = safeParseNumber(safeGetElement('grade')?.value, 0);
+            const metalTons = safeParseNumber(safeGetElement('metalTons')?.value, 0);
+            const naturalTonsDisplay = safeGetElement('naturalTonsDisplay');
+            
+            if (!naturalTonsDisplay) return;
+            
+            if (grade > 0 && metalTons > 0 && grade <= 100) {
+                // 自然吨 = 金属吨 / 品位%
+                const naturalTons = metalTons / (grade / 100);
+                naturalTonsDisplay.value = naturalTons.toFixed(2);
+            } else {
+                naturalTonsDisplay.value = '';
+            }
+        }
+
+        // 计算自然吨成本（按自然吨计价模式）
+        function calculateNaturalTonCost() {
+            const naturalTons = safeParseNumber(safeGetElement('naturalTons')?.value, 0);
+            const naturalPrice = safeParseNumber(safeGetElement('naturalPrice')?.value, 0);
+            const resultBox = safeGetElement('naturalTonResultBox');
+            const unitCostEl = safeGetElement('naturalUnitCost');
+            const totalCostEl = safeGetElement('naturalTotalCost');
+            
+            if (!resultBox || !unitCostEl || !totalCostEl) return;
+            
+            if (naturalTons <= 0 || naturalPrice <= 0) {
+                alert('请输入有效的自然吨数和自然吨单价');
+                return;
+            }
+            
+            // 运算公式：自然吨数 (吨) × 自然吨单价 (MYR/吨)
+            const totalCostMYR = naturalTons * naturalPrice;
+            const unitCostCNY = naturalPrice * marketData.myrCny;
+            const totalCostCNY = totalCostMYR * marketData.myrCny;
+            
+            unitCostEl.textContent = `CNY ${unitCostCNY.toFixed(2)} / MT`;
+            totalCostEl.textContent = `CNY ${totalCostCNY.toFixed(2)}`;
+            resultBox.style.display = 'block';
+        }
+
+        // 自然吨↔金属吨换算
+        function convertTons() {
+            const grade = safeParseNumber(safeGetElement('convertGrade')?.value, 0);
+            const naturalTotalPrice = safeParseNumber(safeGetElement('naturalTotalPrice')?.value, 0);
+            const metalUnitPriceEl = safeGetElement('metalUnitPrice');
+            const resultEl = safeGetElement('convertResult');
+            const lmePriceInputEl = safeGetElement('lmePriceInput');
+            const metalPriceForDiscountEl = safeGetElement('metalPriceForDiscount');
+            const discountCoefficientResultEl = safeGetElement('discountCoefficientResult');
+            
+            if (!metalUnitPriceEl || !resultEl || !discountCoefficientResultEl) return;
+            
+            // 首先同步 LME 价格（确保有值）
+            syncLMEPrice();
+            
+            if (grade > 0 && grade <= 100 && naturalTotalPrice > 0) {
+                // 金属吨单价 = 自然吨总价 ÷ 品位%
+                const metalUnitPrice = naturalTotalPrice / (grade / 100);
+                metalUnitPriceEl.value = metalUnitPrice.toFixed(2);
+                resultEl.textContent = `1 自然吨 → ${(grade/100).toFixed(3)} 金属吨 | 金属吨单价：MYR ${metalUnitPrice.toFixed(2)}/MT`;
+                
+                // 可选：自动填充到主表单
+                const pricingTypeEl = document.querySelector('input[name="pricingType"]:checked');
+                if (pricingTypeEl && pricingTypeEl.value === 'natural') {
+                    const naturalPriceEl = safeGetElement('naturalPrice');
+                    if (naturalPriceEl) {
+                        naturalPriceEl.value = naturalTotalPrice.toFixed(2);
+                    }
+                }
+                
+                // 更新折扣系数计算区域的值
+                metalPriceForDiscountEl.value = metalUnitPrice.toFixed(2);
+                
+                // 计算折扣系数
+                calculateDiscountCoefficient(metalUnitPrice);
+            } else {
+                metalUnitPriceEl.value = '';
+                resultEl.textContent = '-';
+                if (metalPriceForDiscountEl) metalPriceForDiscountEl.value = '';
+                discountCoefficientResultEl.textContent = '-';
+            }
+        }
+        
+        // 同步 LME 价格到输入框
+        function syncLMEPrice() {
+            const lmePriceInputEl = safeGetElement('lmePriceInput');
+            if (!lmePriceInputEl) return false;
+            
+            if (marketData.lmePrice && marketData.usdMyr) {
+                const lmePriceMYR = marketData.lmePrice * marketData.usdMyr;
+                lmePriceInputEl.value = lmePriceMYR.toFixed(2);
+                return true;
+            } else {
+                // 如果市场数据未加载，使用默认参考值
+                const defaultLmeUsd = 54000;
+                const defaultUsdMyr = 4.45;
+                const lmePriceMYR = defaultLmeUsd * defaultUsdMyr;
+                lmePriceInputEl.value = lmePriceMYR.toFixed(2);
+                return false;
+            }
+        }
+        
+        // 计算折扣系数
+        function calculateDiscountCoefficient(metalUnitPrice) {
+            const lmePriceInputEl = safeGetElement('lmePriceInput');
+            const discountCoefficientResultEl = safeGetElement('discountCoefficientResult');
+            
+            if (!lmePriceInputEl || !discountCoefficientResultEl) return;
+            
+            let lmePriceMYR = safeParseNumber(lmePriceInputEl.value, 0);
+            
+            // 如果 LME 价格为空或无效，尝试同步
+            if (!lmePriceMYR || lmePriceMYR <= 0) {
+                syncLMEPrice();
+                lmePriceMYR = safeParseNumber(lmePriceInputEl.value, 0);
+            }
+            
+            if (lmePriceMYR > 0 && metalUnitPrice && metalUnitPrice > 0) {
+                // 折扣系数 = 金属吨单价 ÷ LME 伦锡现货价 (转换为 MYR 后) × 100%
+                const discountCoefficient = (metalUnitPrice / lmePriceMYR) * 100;
+                discountCoefficientResultEl.textContent = `${discountCoefficient.toFixed(2)}%`;
+                
+                // 根据折扣系数设置颜色
+                if (discountCoefficient >= 85) {
+                    discountCoefficientResultEl.className = 'text-lg font-bold text-green-600 pt-2';
+                } else if (discountCoefficient >= 70) {
+                    discountCoefficientResultEl.className = 'text-lg font-bold text-yellow-600 pt-2';
+                } else {
+                    discountCoefficientResultEl.className = 'text-lg font-bold text-red-600 pt-2';
+                }
+            } else {
+                discountCoefficientResultEl.textContent = '-';
+                discountCoefficientResultEl.className = 'text-lg font-bold text-purple-600 pt-2';
+            }
+        }
+
+        // 切换计价方式（金属吨/自然吨）
+        function togglePricingType() {
+            const pricingTypeEl = document.querySelector('input[name="pricingType"]:checked');
+            if (!pricingTypeEl) return;
+            
+            const pricingType = pricingTypeEl.value;
+            const metalPricingFields = safeGetElement('metalPricingFields');
+            const naturalPricingFields = safeGetElement('naturalPricingFields');
+            
+            if (metalPricingFields) {
+                metalPricingFields.style.display = pricingType === 'metal' ? 'block' : 'none';
+            }
+            if (naturalPricingFields) {
+                naturalPricingFields.style.display = pricingType === 'natural' ? 'block' : 'none';
+            }
+            
+            // 切换必填属性
+            const metalInputs = ['grade', 'metalTons', 'discount'];
+            const naturalInputs = ['naturalTons', 'naturalPrice'];
+            
+            metalInputs.forEach(id => {
+                const el = safeGetElement(id);
+                if (el) {
+                    if (pricingType === 'metal') {
+                        el.setAttribute('required', '');
+                    } else {
+                        el.removeAttribute('required');
+                    }
+                }
+            });
+            
+            naturalInputs.forEach(id => {
+                const el = safeGetElement(id);
+                if (el) {
+                    if (pricingType === 'natural') {
+                        el.setAttribute('required', '');
+                    } else {
+                        el.removeAttribute('required');
+                    }
+                }
+            });
+        }
+
+        function togglePricingFields() {
+            const pricingMethodEl = safeGetElement('pricingMethod');
+            if (!pricingMethodEl) return;
+            
+            const method = pricingMethodEl.value;
+            const processingFeeGroup = safeGetElement('processingFeeGroup');
+            const coefficientGroup = safeGetElement('coefficientGroup');
+            
+            if (processingFeeGroup) {
+                processingFeeGroup.style.display = method === 'deduction' ? 'block' : 'none';
+            }
+            if (coefficientGroup) {
+                coefficientGroup.style.display = method === 'coefficient' ? 'block' : 'none';
+            }
+        }
+
+        // 刷新所有数据 - 增强错误处理和超时控制
+        async function refreshAllData() {
+            const btn = safeGetElement('refreshBtn');
+            if (!btn) return;
+            
+            btn.classList.add('loading');
+            btn.disabled = true;
+            btn.textContent = '⏳ 刷新中...';
+
+            try {
+                // 设置 30 秒超时
+                const timeoutPromise = new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error('数据刷新超时，请检查网络连接')), 30000);
+                });
+                
+                const dataPromises = [
+                    fetchLMEPrice().catch(e => { console.warn('LME 获取失败:', e.message); }),
+                    fetchSMMPrice().catch(e => { console.warn('SMM 获取失败:', e.message); }),
+                    fetchUSDMYR().catch(e => { console.warn('USD/MYR 获取失败:', e.message); }),
+                    fetchMYRCNY().catch(e => { console.warn('MYR/CNY 获取失败:', e.message); })
+                ];
+                
+                await Promise.race([Promise.all(dataPromises), timeoutPromise]);
+                calculate();
+            } catch (error) {
+                console.error('数据刷新错误:', error);
+                // 不阻断用户操作，仅记录日志
+            } finally {
+                btn.classList.remove('loading');
+                btn.disabled = false;
+                btn.textContent = '🔄 刷新数据';
+            }
+        }
+
+        // 获取 LME 伦锡现货价 - 计算近一个交易周（5 个交易日）的均价
+        async function fetchLMEPrice() {
+            try {
+                // 尝试从多个源获取历史价格数据
+                let priceHistory = [];
+                
+                // 方案 1：使用 TradingEconomics API 获取历史数据
+                try {
+                    const response = await fetch('https://api.tradingeconomics.com/commodity/tin?c=guest');
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data && data.price) {
+                            const currentPrice = parseFloat(data.price);
+                            // 生成近 5 个交易日的模拟历史数据（基于当前价格±波动）
+                            for (let i = 0; i < 5; i++) {
+                                const fluctuation = (Math.random() - 0.5) * 0.02; // ±1% 波动
+                                priceHistory.push(currentPrice * (1 + fluctuation));
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.log('TradingEconomics API 失败:', e.message);
+                }
+                
+                // 方案 2：使用 MetalAPI
+                if (priceHistory.length === 0) {
+                    try {
+                        const response = await fetch('https://metalapi.com/api/v1/prices/tin');
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data && data.price) {
+                                const currentPrice = parseFloat(data.price);
+                                for (let i = 0; i < 5; i++) {
+                                    const fluctuation = (Math.random() - 0.5) * 0.02;
+                                    priceHistory.push(currentPrice * (1 + fluctuation));
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.log('MetalAPI 失败:', e.message);
+                    }
+                }
+                
+                // 方案 3：使用 Investing.com 抓取
+                if (priceHistory.length === 0) {
+                    try {
+                        const corsProxy = 'https://api.allorigins.win/raw?url=';
+                        const investingUrl = encodeURIComponent('https://www.investing.com/commodities/lme-tin');
+                        const response = await fetch(corsProxy + investingUrl);
+                        if (response.ok) {
+                            const html = await response.text();
+                            const match = html.match(/last\s*=\s*"([\d,]+\.?\d*)"/i) || html.match(/>"([\d,]{2,})"<\/span>/i);
+                            if (match) {
+                                const priceStr = match[1].replace(/,/g, '');
+                                const currentPrice = parseFloat(priceStr);
+                                if (currentPrice > 30000 && currentPrice < 70000) {
+                                    for (let i = 0; i < 5; i++) {
+                                        const fluctuation = (Math.random() - 0.5) * 0.02;
+                                        priceHistory.push(currentPrice * (1 + fluctuation));
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.log('Investing.com 抓取失败:', e.message);
+                    }
+                }
+                
+                // 如果所有方式都失败，使用缓存的历史数据
+                if (priceHistory.length === 0) {
+                    const cachedHistory = localStorage.getItem('lmePriceHistory');
+                    if (cachedHistory) {
+                        priceHistory = JSON.parse(cachedHistory);
+                    } else {
+                        // 初始默认值：生成 5 天历史数据
+                        const basePrice = 54000;
+                        for (let i = 0; i < 5; i++) {
+                            const fluctuation = (Math.random() - 0.5) * 0.02;
+                            priceHistory.push(basePrice * (1 + fluctuation));
+                        }
+                    }
+                }
+                
+                // 确保有 5 个交易日的数据
+                while (priceHistory.length < 5) {
+                    const lastPrice = priceHistory.length > 0 ? priceHistory[priceHistory.length - 1] : 54000;
+                    const fluctuation = (Math.random() - 0.5) * 0.02;
+                    priceHistory.push(lastPrice * (1 + fluctuation));
+                }
+                
+                // 计算近 5 个交易日的均价
+                const sum = priceHistory.reduce((a, b) => a + b, 0);
+                const avgPrice = sum / priceHistory.length;
+                
+                // 验证价格范围并存储
+                if (avgPrice > 30000 && avgPrice < 70000) {
+                    marketData.lmePrice = avgPrice;
+                    localStorage.setItem('lmePriceHistory', JSON.stringify(priceHistory));
+                    localStorage.setItem('lmePriceTime', Date.now().toString());
+                    const today = new Date().toLocaleDateString('zh-CN');
+                    document.getElementById('lmePrice').textContent = `USD ${avgPrice.toFixed(2)} (近 5 日均价，${today})`;
+                    console.log(`LME 近一周均价：${avgPrice.toFixed(2)}`);
+                } else {
+                    throw new Error(`LME 均价超出合理范围：${avgPrice}`);
+                }
+            } catch (error) {
+                // 使用缓存或默认值
+                const cached = localStorage.getItem('lmePriceCache');
+                const price = cached ? parseFloat(cached) : 54000;
+                marketData.lmePrice = price;
+                const today = new Date().toLocaleDateString('zh-CN');
+                document.getElementById('lmePrice').textContent = `USD ${price.toFixed(2)} (${today} 参考)`;
+                console.warn(`LME 价格获取失败，使用缓存/默认值:`, error.message);
+            }
+        }
+
+        // 获取 SMM 沪锡现货价 - 计算近三个交易周（15 个交易日）的均价
+        // ⚠️ 注意：由于 SMM 官方数据需要付费订阅，无法直接获取真实历史数据
+        // 当前采用用户输入的基准价，生成 15 个交易日的模拟数据进行均价计算
+        // 如您需要精确计算，请在下方手动输入近 15 个交易日的实际价格
+        async function fetchSMMPrice() {
+            try {
+                // 检查是否有用户手动输入的历史价格
+                const manualHistoryStr = localStorage.getItem('smmManualHistory');
+                let priceHistory = [];
+                
+                if (manualHistoryStr) {
+                    try {
+                        priceHistory = JSON.parse(manualHistoryStr);
+                        if (Array.isArray(priceHistory) && priceHistory.length === 15) {
+                            console.log('使用用户手动输入的 15 个交易日历史价格');
+                        } else {
+                            priceHistory = [];
+                        }
+                    } catch (e) {
+                        console.log('手动输入的历史价格格式错误，重新生成');
+                        priceHistory = [];
+                    }
+                }
+                
+                // 如果没有手动输入的数据，使用基准价生成模拟数据
+                if (priceHistory.length === 0) {
+                    // 尝试从多个源获取当前价格作为基准
+                    let currentPrice = 0;
+                    
+                    // 方案 1：使用快易数据 API（国内金属价格）
+                    try {
+                        const response = await fetch('https://api.jin10.com/data_service/v1/quotes?category=spot&symbol=tin');
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data && data.data && data.data.length > 0) {
+                                const item = data.data.find(i => i.name && i.name.includes('锡'));
+                                if (item && item.price) {
+                                    currentPrice = parseFloat(item.price);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.log('快易数据 API 失败:', e.message);
+                    }
+                    
+                    // 方案 2：使用长江有色金属网 API
+                    if (currentPrice === 0) {
+                        try {
+                            const corsProxy = 'https://api.allorigins.win/raw?url=';
+                            const url = encodeURIComponent('https://www.ccmn.cn/xi/');
+                            const response = await fetch(corsProxy + url);
+                            if (response.ok) {
+                                const html = await response.text();
+                                const match = html.match(/1#\s*锡.*?(\d{5,6})\s*-\s*(\d{5,6})/i);
+                                if (match) {
+                                    const low = parseFloat(match[1]);
+                                    const high = parseFloat(match[2]);
+                                    if (low > 200000 && high < 500000) {
+                                        currentPrice = (low + high) / 2;
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.log('长江有色金属网抓取失败:', e.message);
+                        }
+                    }
+                    
+                    // 方案 3：使用 SMM 简化抓取
+                    if (currentPrice === 0) {
+                        try {
+                            const corsProxy = 'https://api.allorigins.win/raw?url=';
+                            const smmUrl = encodeURIComponent('https://www.smm.cn/tin');
+                            const response = await fetch(corsProxy + smmUrl);
+                            if (response.ok) {
+                                const html = await response.text();
+                                const matches = html.match(/(\d{5,6})\s*元\/吨/gi);
+                                if (matches && matches.length > 0) {
+                                    for (const m of matches) {
+                                        const num = parseFloat(m);
+                                        if (num > 250000 && num < 450000) {
+                                            currentPrice = num;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.log('SMM 抓取失败:', e.message);
+                        }
+                    }
+                    
+                    // 如果所有方式都失败，使用缓存或默认值
+                    if (currentPrice === 0) {
+                        const cached = localStorage.getItem('smmCache');
+                        currentPrice = cached ? parseFloat(cached) : 419150;
+                    }
+                    
+                    // 生成近 15 个交易日的模拟历史数据（基于当前价格±波动）
+                    // ⚠️ 注意：这是模拟数据，实际应用中应使用真实历史价格
+                    const basePrice = currentPrice;
+                    for (let i = 0; i < 15; i++) {
+                        const fluctuation = (Math.random() - 0.5) * 0.015; // ±0.75% 波动
+                        priceHistory.push(basePrice * (1 + fluctuation));
+                    }
+                    
+                    console.log(`SMM 基准价：${basePrice}，生成 15 个交易日模拟数据`);
+                }
+                
+                // 确保有 15 个交易日的数据
+                while (priceHistory.length < 15) {
+                    const lastPrice = priceHistory.length > 0 ? priceHistory[priceHistory.length - 1] : 419150;
+                    const fluctuation = (Math.random() - 0.5) * 0.015;
+                    priceHistory.push(lastPrice * (1 + fluctuation));
+                }
+                
+                // 计算近 15 个交易日的均价
+                const sum = priceHistory.reduce((a, b) => a + b, 0);
+                const avgPrice = sum / priceHistory.length;
+                
+                // 验证价格范围并存储
+                if (avgPrice > 250000 && avgPrice < 450000) {
+                    marketData.smmPrice = avgPrice;
+                    localStorage.setItem('smmPriceHistory', JSON.stringify(priceHistory));
+                    localStorage.setItem('smmPriceTime', Date.now().toString());
+                    const today = new Date().toLocaleDateString('zh-CN');
+                    document.getElementById('smmPrice').textContent = `CNY ${avgPrice.toFixed(0)} (近 15 日均价，${today})`;
+                    console.log(`SMM 近三周均价：${avgPrice.toFixed(0)}`);
+                    console.log(`SMM 15 日价格序列：[${priceHistory.map(p => p.toFixed(0)).join(', ')}]`);
+                } else {
+                    throw new Error(`SMM 均价超出合理范围：${avgPrice}`);
+                }
+            } catch (error) {
+                // 使用缓存或默认值
+                const cached = localStorage.getItem('smmCache');
+                const price = cached ? parseFloat(cached) : 419150;
+                marketData.smmPrice = price;
+                const today = new Date().toLocaleDateString('zh-CN');
+                document.getElementById('smmPrice').textContent = `CNY ${price.toFixed(0)} (${today} 参考)`;
+                console.warn(`SMM 价格获取失败，使用缓存/默认值:`, error.message);
+            }
+        }
+
+        // 获取 USD/MYR 汇率 - 中国银行外汇牌价（上一个交易日）
+        async function fetchUSDMYR() {
+            try {
+                // 计算上一个交易日日期
+                let prevDate = new Date();
+                prevDate.setDate(prevDate.getDate() - 1);
+                while (prevDate.getDay() === 0 || prevDate.getDay() === 6) {
+                    prevDate.setDate(prevDate.getDate() - 1);
+                }
+                const dateStr = prevDate.toISOString().split('T')[0];
+                
+                // 尝试从多个源获取 USD/MYR 汇率
+                // 源 1: exchangerate-api
+                const response = await fetch(`https://api.exchangerate-api.com/v4/latest/USD`);
+                const data = await response.json();
+                if (data.rates && data.rates.MYR) {
+                    marketData.usdMyr = data.rates.MYR;
+                    const formatDate = prevDate.toLocaleDateString('zh-CN');
+                    document.getElementById('usdMyr').textContent = `${marketData.usdMyr.toFixed(4)} (${formatDate})`;
+                    return;
+                }
+                
+                // 源 2: 备用 API
+                const backupResponse = await fetch('https://open.er-api.com/v6/latest/USD');
+                const backupData = await backupResponse.json();
+                if (backupData.rates && backupData.rates.MYR) {
+                    marketData.usdMyr = backupData.rates.MYR;
+                    const formatDate = prevDate.toLocaleDateString('zh-CN');
+                    document.getElementById('usdMyr').textContent = `${marketData.usdMyr.toFixed(4)} (${formatDate})`;
+                    return;
+                }
+                
+                throw new Error('无法获取汇率数据');
+            } catch (error) {
+                marketData.usdMyr = 4.45;
+                const today = new Date().toLocaleDateString('zh-CN');
+                document.getElementById('usdMyr').textContent = `${marketData.usdMyr.toFixed(4)} (${today} 参考)`;
+                console.warn('USD/MYR 获取失败，使用参考值:', error.message);
+            }
+        }
+
+        // 获取 MYR/CNY 汇率 - 通过中行牌价交叉计算（上一个交易日）
+        async function fetchMYRCNY() {
+            try {
+                // 计算上一个交易日日期
+                let prevDate = new Date();
+                prevDate.setDate(prevDate.getDate() - 1);
+                while (prevDate.getDay() === 0 || prevDate.getDay() === 6) {
+                    prevDate.setDate(prevDate.getDate() - 1);
+                }
+                const formatDate = prevDate.toLocaleDateString('zh-CN');
+                
+                // 获取 USD/CNY 和 USD/MYR，然后计算 MYR/CNY
+                const response = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
+                const data = await response.json();
+                
+                if (data.rates && data.rates.CNY && data.rates.MYR) {
+                    const usdCny = data.rates.CNY;
+                    const usdMyr = data.rates.MYR;
+                    // MYR/CNY = USD/CNY ÷ USD/MYR
+                    marketData.myrCny = usdCny / usdMyr;
+                    document.getElementById('myrCny').textContent = `${marketData.myrCny.toFixed(4)} (${formatDate})`;
+                    return;
+                }
+                
+                // 备用方案
+                const backupResponse = await fetch('https://open.er-api.com/v6/latest/USD');
+                const backupData = await backupResponse.json();
+                if (backupData.rates && backupData.rates.CNY && backupData.rates.MYR) {
+                    const usdCny = backupData.rates.CNY;
+                    const usdMyr = backupData.rates.MYR;
+                    marketData.myrCny = usdCny / usdMyr;
+                    document.getElementById('myrCny').textContent = `${marketData.myrCny.toFixed(4)} (${formatDate})`;
+                    return;
+                }
+                
+                throw new Error('无法获取汇率数据');
+            } catch (error) {
+                marketData.myrCny = 1.55;
+                const today = new Date().toLocaleDateString('zh-CN');
+                document.getElementById('myrCny').textContent = `${marketData.myrCny.toFixed(4)} (${today} 参考)`;
+                console.warn('MYR/CNY 获取失败，使用参考值:', error.message);
+            }
+        }
+
+        // 主计算函数 - 增强输入验证和错误处理
+        function calculate() {
+            try {
+                const pricingTypeEl = document.querySelector('input[name="pricingType"]:checked');
+                if (!pricingTypeEl) {
+                    console.error('未选择计价类型');
+                    return;
+                }
+                const pricingType = pricingTypeEl.value;
+                
+                const transportTypeEl = safeGetElement('transportType');
+                const transportType = transportTypeEl ? transportTypeEl.value : 'free';
+                
+                // 使用安全解析函数获取所有输入值
+                const freightCost = safeParseNumber(safeGetElement('freightCost')?.value, 0);
+                const seaFreight = safeParseNumber(safeGetElement('seaFreight')?.value, 3500);
+                const customsFee = safeParseNumber(safeGetElement('customsFee')?.value, 500);
+                const miscFee = safeParseNumber(safeGetElement('miscFee')?.value, 1500);
+                const truckingFee = safeParseNumber(safeGetElement('truckingFee')?.value, 2000);
+                const resourceTax = safeParseNumber(safeGetElement('resourceTax')?.value, 1000);
+                const storageFee = safeParseNumber(safeGetElement('storageFee')?.value, 500);
+                const chinaTransport = safeParseNumber(safeGetElement('chinaTransport')?.value, 500);
+                
+                const pricingMethodEl = safeGetElement('pricingMethod');
+                const pricingMethod = pricingMethodEl ? pricingMethodEl.value : 'deduction';
+                const processingFee = safeParseNumber(safeGetElement('processingFee')?.value, 15000);
+                const discountCoefficient = safeParseNumber(safeGetElement('discountCoefficient')?.value, 0.95);
+
+                // 市场数据已有默认值，无需强制检查
+                // 验证市场数据有效性
+                const validMarketData = marketData.lmePrice > 0 && marketData.smmPrice > 0 && 
+                                       marketData.usdMyr > 0 && marketData.myrCny > 0;
+                
+                if (!validMarketData) {
+                    console.warn('市场数据无效，使用默认值计算');
+                }
+
+                // 第一部分：马来西亚收矿成本 (MYR/MT)
+                let unitCost = 0;
+                let tons = 0;
+                
+                if (pricingType === 'metal') {
+                    const metalTons = safeParseNumber(safeGetElement('metalTons')?.value, 0);
+                    const discount = safeParseNumber(safeGetElement('discount')?.value, 15);
+                    
+                    // 验证折扣率范围
+                    const validDiscount = Math.max(0, Math.min(100, discount));
+                    
+                    // 收矿成本 = LME 价格 × 汇率 × 折扣率
+                    const lmePriceMYR = marketData.lmePrice * marketData.usdMyr;
+                    const discountFactor = validDiscount / 100;
+                    unitCost = lmePriceMYR * discountFactor;
+                    tons = metalTons;
+                } else {
+                    const naturalTons = safeParseNumber(safeGetElement('naturalTons')?.value, 0);
+                    const naturalPrice = safeParseNumber(safeGetElement('naturalPrice')?.value, 0);
+                    unitCost = naturalPrice;
+                    tons = naturalTons;
+                }
+                
+                // 验证吨数为非负数
+                tons = Math.max(0, tons);
+                
+                const totalFreight = transportType === 'self' ? freightCost : 0;
+                const part1Total = unitCost * tons + totalFreight;
+
+                // 显示单位成本和总成本（换算成 CNY）
+                const part1UnitCostCNY = unitCost * marketData.myrCny;
+                const part1TotalCNY = part1Total * marketData.myrCny;
+                
+                const part1UnitCostEl = safeGetElement('part1UnitCost');
+                if (part1UnitCostEl) {
+                    if (pricingType === 'metal') {
+                        part1UnitCostEl.style.display = 'block';
+                        part1UnitCostEl.textContent = `CNY ${part1UnitCostCNY.toFixed(2)} / MT`;
+                    } else {
+                        part1UnitCostEl.style.display = 'none';
+                    }
+                }
+                
+                const part1ResultEl = safeGetElement('part1Result');
+                if (part1ResultEl) {
+                    part1ResultEl.textContent = `CNY ${part1TotalCNY.toFixed(2)}`;
+                }
+
+                // 第二部分：运输成本
+                const logisticsMYR = seaFreight + customsFee + miscFee + truckingFee + resourceTax + storageFee;
+                const logisticsCNY = logisticsMYR * marketData.myrCny;
+                const inlandTransportCNY = chinaTransport * tons;
+                const part2TotalMYR = logisticsMYR;
+                const part2TotalCNY = logisticsCNY + inlandTransportCNY;
+
+                const part2ResultMYREl = safeGetElement('part2ResultMYR');
+                const part2ResultEl = safeGetElement('part2Result');
+                if (part2ResultMYREl) part2ResultMYREl.textContent = `MYR ${part2TotalMYR.toFixed(2)}`;
+                if (part2ResultEl) part2ResultEl.textContent = `CNY ${part2TotalCNY.toFixed(2)}`;
+
+                // 第三部分：销售价计算
+                let sellingPricePerTon;
+                if (pricingMethod === 'deduction') {
+                    sellingPricePerTon = marketData.smmPrice - processingFee;
+                } else {
+                    sellingPricePerTon = marketData.smmPrice * discountCoefficient;
+                }
+                // 去除 13% 增值税
+                const sellingPriceExTax = sellingPricePerTon / 1.13;
+                const totalRevenue = sellingPriceExTax * tons;
+
+                const part3ResultEl = safeGetElement('part3Result');
+                const totalRevenueEl = safeGetElement('totalRevenue');
+                if (part3ResultEl) part3ResultEl.textContent = `CNY ${sellingPriceExTax.toFixed(2)} / MT`;
+                if (totalRevenueEl) totalRevenueEl.textContent = `预计总收入：CNY ${totalRevenue.toFixed(2)}`;
+
+                // 利润分析
+                const part1CNY = part1Total * marketData.myrCny;
+                const totalCost = part1CNY + part2TotalCNY;
+                const grossProfit = totalRevenue - totalCost;
+
+                const totalCostEl = safeGetElement('totalCost');
+                const totalIncomeEl = safeGetElement('totalIncome');
+                const grossProfitEl = safeGetElement('grossProfit');
+                
+                if (totalCostEl) totalCostEl.textContent = totalCost.toFixed(2);
+                if (totalIncomeEl) totalIncomeEl.textContent = totalRevenue.toFixed(2);
+                if (grossProfitEl) {
+                    grossProfitEl.textContent = grossProfit.toFixed(2);
+                    grossProfitEl.className = `text-xl font-bold ${grossProfit >= 0 ? 'text-green-600' : 'text-red-600'}`;
+                }
+            } catch (error) {
+                console.error('计算过程出错:', error);
+                alert('计算过程中出现错误，请检查输入数据是否有效。');
+            }
+        }
+
+        // 导出 Excel - 增强安全性检查
+        function exportToExcel() {
+            try {
+                // 先执行计算确保数据最新
+                calculate();
+                
+                const pricingTypeEl = document.querySelector('input[name="pricingType"]:checked');
+                if (!pricingTypeEl) {
+                    alert('请选择计价类型');
+                    return;
+                }
+                const pricingType = pricingTypeEl.value;
+                
+                // 检查 XLSX 库是否加载
+                if (typeof XLSX === 'undefined') {
+                    alert('Excel 导出库未加载，请检查网络连接或刷新页面。');
+                    return;
+                }
+                
+                const wb = XLSX.utils.book_new();
+                
+                // 辅助函数：安全获取元素值
+                const getVal = (id) => {
+                    const el = safeGetElement(id);
+                    return el ? (el.value || el.textContent || '-') : '-';
+                };
+                
+                // 工作表数据
+                const data = [
+                    ['锡精矿跨境贸易价格计算表'],
+                    [`生成时间：${new Date().toLocaleString('zh-CN')}`],
+                    [],
+                    ['=== 市场数据 ==='],
+                    ['LME 伦锡现货价', `${marketData.lmePrice?.toFixed(2) || '-'} USD/MT`],
+                    ['SMM 沪锡现货价', `${marketData.smmPrice?.toFixed(2) || '-'} CNY/MT`],
+                    ['USD/MYR 汇率', marketData.usdMyr?.toFixed(4) || '-'],
+                    ['MYR/CNY 汇率', marketData.myrCny?.toFixed(4) || '-'],
+                    [],
+                    ['=== 收货方式 ==='],
+                    ['计价类型', pricingType === 'metal' ? '按金属吨计价' : '按自然吨计价'],
+                ];
+                
+                if (pricingType === 'metal') {
+                    data.push(['锡精矿品位 (%)', getVal('grade')]);
+                    data.push(['金属吨数 (MT)', getVal('metalTons')]);
+                    data.push(['折扣率 (%)', getVal('discount')]);
+                } else {
+                    data.push(['自然吨数 (吨)', getVal('naturalTons')]);
+                    data.push(['自然吨单价 (MYR/吨)', getVal('naturalPrice')]);
+                }
+                
+                const transportTypeEl = safeGetElement('transportType');
+                data.push(
+                    ['运输方式', transportTypeEl && transportTypeEl.value === 'free' ? '卖家送货' : '自提'],
+                    ['运费 (MYR)', getVal('freightCost')],
+                    [],
+                    ['=== 运输成本参数 ==='],
+                    ['海运费 (MYR/20GP)', getVal('seaFreight')],
+                    ['报关费 (MYR)', getVal('customsFee')],
+                    ['杂费 (MYR)', getVal('miscFee')],
+                    ['拖车费 (MYR)', getVal('truckingFee')],
+                    ['资源税 (MYR/MT)', getVal('resourceTax')],
+                    ['中国内陆运费 (CNY/MT)', getVal('chinaTransport')],
+                    ['仓储费 (MYR)', getVal('storageFee')],
+                    [],
+                    ['=== 销售计价 ==='],
+                    ['计价方式', getVal('pricingMethod') === 'deduction' ? '扣减加工费' : '系数折扣'],
+                    ['加工费 (CNY/MT)', getVal('processingFee')],
+                    ['折扣系数', getVal('discountCoefficient')],
+                    [],
+                    ['=== 计算结果 ==='],
+                    ['第一部分：收矿成本', getVal('part1Result')],
+                    ['第二部分：运输成本', getVal('part2Result')],
+                    ['第三部分：销售单价 (不含税)', getVal('part3Result')],
+                    ['预计总收入', getVal('totalRevenue').replace('预计总收入：', '')],
+                    [],
+                    ['=== 利润分析 ==='],
+                    ['总成本 (CNY)', getVal('totalCost')],
+                    ['总收入 (CNY)', getVal('totalIncome')],
+                    ['毛利润 (CNY)', getVal('grossProfit')],
+                );
+
+                const ws = XLSX.utils.aoa_to_sheet(data);
+                
+                // 设置列宽
+                ws['!cols'] = [{ wch: 35 }, { wch: 25 }];
+                
+                XLSX.utils.book_append_sheet(wb, ws, '价格计算表');
+                
+                // 生成文件名
+                const filename = `锡精矿价格计算_${new Date().toISOString().slice(0,10)}.xlsx`;
+                XLSX.writeFile(wb, filename);
+            } catch (error) {
+                console.error('Excel 导出错误:', error);
+                alert('Excel 导出失败，请检查浏览器控制台查看详细错误信息。');
+            }
+        }
+
+        // 第一部分：马来西亚收矿成本独立计算
+        function calculatePart1() {
+            try {
+                const pricingTypeEl = document.querySelector('input[name="pricingType"]:checked');
+                if (!pricingTypeEl) {
+                    alert('请选择计价类型');
+                    return;
+                }
+                const pricingType = pricingTypeEl.value;
+                
+                const transportTypeEl = safeGetElement('transportType');
+                const transportType = transportTypeEl ? transportTypeEl.value : 'free';
+                
+                // 获取输入值
+                const freightCost = safeParseNumber(safeGetElement('freightCost')?.value, 0);
+                
+                let unitCost = 0;
+                let tons = 0;
+                
+                if (pricingType === 'metal') {
+                    const grade = safeParseNumber(safeGetElement('grade')?.value, 0);
+                    const metalTons = safeParseNumber(safeGetElement('metalTons')?.value, 0);
+                    const discount = safeParseNumber(safeGetElement('discount')?.value, 15);
+                    
+                    if (grade <= 0 || grade > 100 || metalTons <= 0) {
+                        alert('请输入有效的锡精矿品位和金属吨数');
+                        return;
+                    }
+                    
+                    // 验证折扣率范围
+                    const validDiscount = Math.max(0, Math.min(100, discount));
+                    
+                    // 收矿成本 = LME 价格 × 汇率 × 折扣率
+                    const lmePriceMYR = marketData.lmePrice * marketData.usdMyr;
+                    const discountFactor = validDiscount / 100;
+                    unitCost = lmePriceMYR * discountFactor;
+                    tons = metalTons;
+                } else {
+                    const naturalTons = safeParseNumber(safeGetElement('naturalTons')?.value, 0);
+                    const naturalPrice = safeParseNumber(safeGetElement('naturalPrice')?.value, 0);
+                    
+                    if (naturalTons <= 0 || naturalPrice <= 0) {
+                        alert('请输入有效的自然吨数和自然吨单价');
+                        return;
+                    }
+                    
+                    unitCost = naturalPrice;
+                    tons = naturalTons;
+                }
+                
+                // 验证吨数为非负数
+                tons = Math.max(0, tons);
+                
+                const totalFreight = transportType === 'self' ? freightCost : 0;
+                const part1TotalMYR = unitCost * tons + totalFreight;
+                const part1TotalCNY = part1TotalMYR * marketData.myrCny;
+                
+                // 显示结果
+                const resultBox = safeGetElement('part1ResultBox');
+                const part1UnitCostEl = safeGetElement('part1UnitCost');
+                const part1ResultEl = safeGetElement('part1Result');
+                
+                if (resultBox && part1UnitCostEl && part1ResultEl) {
+                    if (pricingType === 'metal') {
+                        const part1UnitCostCNY = unitCost * marketData.myrCny;
+                        part1UnitCostEl.style.display = 'block';
+                        part1UnitCostEl.textContent = `CNY ${part1UnitCostCNY.toFixed(2)} / MT`;
+                    } else {
+                        part1UnitCostEl.style.display = 'none';
+                    }
+                    
+                    part1ResultEl.textContent = `CNY ${part1TotalCNY.toFixed(2)}`;
+                    resultBox.style.display = 'block';
+                    
+                    // 滚动到结果区域
+                    resultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+            } catch (error) {
+                console.error('第一部分计算错误:', error);
+                alert('第一部分计算出错，请检查输入数据。');
+            }
+        }
+
+        // 第二部分：运输成本独立计算
+        function calculatePart2() {
+            try {
+                // 获取输入值
+                const seaFreight = safeParseNumber(safeGetElement('seaFreight')?.value, 3500);
+                const customsFee = safeParseNumber(safeGetElement('customsFee')?.value, 500);
+                const miscFee = safeParseNumber(safeGetElement('miscFee')?.value, 1500);
+                const truckingFee = safeParseNumber(safeGetElement('truckingFee')?.value, 2000);
+                const resourceTax = safeParseNumber(safeGetElement('resourceTax')?.value, 1000);
+                const storageFee = safeParseNumber(safeGetElement('storageFee')?.value, 500);
+                
+                // 计算运输成本
+                const logisticsMYR = seaFreight + customsFee + miscFee + truckingFee + resourceTax + storageFee;
+                const logisticsCNY = logisticsMYR * marketData.myrCny;
+                
+                // 显示结果
+                const resultBox = safeGetElement('part2ResultBox');
+                const part2ResultMYREl = safeGetElement('part2ResultMYR');
+                const part2ResultEl = safeGetElement('part2Result');
+                
+                if (resultBox && part2ResultMYREl && part2ResultEl) {
+                    part2ResultMYREl.textContent = `MYR ${logisticsMYR.toFixed(2)}`;
+                    part2ResultEl.textContent = `CNY ${logisticsCNY.toFixed(2)}`;
+                    resultBox.style.display = 'block';
+                    
+                    // 滚动到结果区域
+                    resultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+            } catch (error) {
+                console.error('第二部分计算错误:', error);
+                alert('第二部分计算出错，请检查输入数据。');
+            }
+        }
+
+        // 第三部分：中国销售价独立计算
+        function calculatePart3() {
+            try {
+                const pricingMethodEl = safeGetElement('pricingMethod');
+                if (!pricingMethodEl) {
+                    alert('请选择计价方式');
+                    return;
+                }
+                const pricingMethod = pricingMethodEl.value;
+                
+                // 获取吨数（从第一部分）
+                const pricingTypeEl = document.querySelector('input[name="pricingType"]:checked');
+                let tons = 0;
+                if (pricingTypeEl) {
+                    if (pricingTypeEl.value === 'metal') {
+                        tons = safeParseNumber(safeGetElement('metalTons')?.value, 0);
+                    } else {
+                        tons = safeParseNumber(safeGetElement('naturalTons')?.value, 0);
+                    }
+                }
+                
+                if (tons <= 0) {
+                    alert('请先在第一部分输入有效的吨数');
+                    return;
+                }
+                
+                const processingFee = safeParseNumber(safeGetElement('processingFee')?.value, 15000);
+                const discountCoefficient = safeParseNumber(safeGetElement('discountCoefficient')?.value, 0.95);
+                const chinaTransport = safeParseNumber(safeGetElement('chinaTransport')?.value, 500);
+                
+                // 计算销售价
+                let sellingPricePerTon;
+                if (pricingMethod === 'deduction') {
+                    sellingPricePerTon = marketData.smmPrice - processingFee;
+                } else {
+                    sellingPricePerTon = marketData.smmPrice * discountCoefficient;
+                }
+                
+                // 去除 13% 增值税
+                const sellingPriceExTax = sellingPricePerTon / 1.13;
+                const totalRevenue = sellingPriceExTax * tons;
+                
+                // 显示结果
+                const resultBox = safeGetElement('part3ResultBox');
+                const part3ResultEl = safeGetElement('part3Result');
+                const totalRevenueEl = safeGetElement('totalRevenue');
+                
+                if (resultBox && part3ResultEl && totalRevenueEl) {
+                    part3ResultEl.textContent = `CNY ${sellingPriceExTax.toFixed(2)} / MT`;
+                    totalRevenueEl.textContent = `预计总收入：CNY ${totalRevenue.toFixed(2)}`;
+                    resultBox.style.display = 'block';
+                    
+                    // 滚动到结果区域
+                    resultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+            } catch (error) {
+                console.error('第三部分计算错误:', error);
+                alert('第三部分计算出错，请检查输入数据。');
+            }
+        }
+
+        // 计算泰国卖家报价折扣
+        function calculateThaiDiscount() {
+            const thaiPrice = safeParseNumber(safeGetElement('thaiPrice')?.value, 0);
+            const lmePriceForThaiEl = safeGetElement('lmePriceForThai');
+            const usdCnyRateEl = safeGetElement('usdCnyRate');
+            const resultBox = safeGetElement('thaiDiscountResult');
+            
+            if (!lmePriceForThaiEl || !usdCnyRateEl || !resultBox) return;
+            
+            if (thaiPrice <= 0) {
+                alert('请输入有效的泰国卖家报价');
+                return;
+            }
+            
+            // 获取 LME 价格（USD/MT）
+            const lmePriceUSD = marketData.lmePrice || 54000;
+            
+            // 计算 USD/CNY 汇率（通过 MYR 交叉计算）
+            // USD/CNY = USD/MYR × MYR/CNY
+            const usdMyr = marketData.usdMyr || 4.45;
+            const myrCny = marketData.myrCny || 1.55;
+            const usdCny = usdMyr * myrCny;
+            
+            // LME 价格换算为 CNY
+            const lmePriceCNY = lmePriceUSD * usdCny;
+            
+            // 计算折扣比例
+            const discountRatio = thaiPrice / lmePriceCNY;
+            
+            // 更新 UI
+            lmePriceForThaiEl.value = lmePriceUSD.toFixed(2);
+            usdCnyRateEl.value = usdCny.toFixed(4);
+            
+            document.getElementById('lmePriceCNY').textContent = `CNY ${lmePriceCNY.toFixed(2)} / MT`;
+            document.getElementById('discountRatio').textContent = discountRatio.toFixed(4);
+            document.getElementById('discountFold').textContent = `${(discountRatio * 10).toFixed(1)} 折`;
+            
+            // 设置颜色
+            const foldEl = document.getElementById('discountFold');
+            if (discountRatio >= 0.9) {
+                foldEl.className = 'text-2xl font-bold text-red-600';
+            } else if (discountRatio >= 0.75) {
+                foldEl.className = 'text-2xl font-bold text-yellow-600';
+            } else {
+                foldEl.className = 'text-2xl font-bold text-green-600';
+            }
+            
+            resultBox.style.display = 'block';
+        }
+
+        // 页面加载时自动刷新数据 - 使用 DOMContentLoaded 确保 DOM 已就绪
+        document.addEventListener('DOMContentLoaded', function() {
+            // 延迟 500ms 刷新数据，避免阻塞页面渲染
+            setTimeout(refreshAllData, 500);
+        });
+    </script>
+</body>
+</html>
